@@ -2,7 +2,7 @@ const QRCode = require("qrcode-svg");
 import WXBizMsgCrypt from "./WXBizMsgCrypt";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
-class WxInterface {
+class WxAPI {
 	constructor(request, env) {
 		this.args = Object.fromEntries(new URL(request.url).searchParams);
 		this.request = request;
@@ -379,20 +379,20 @@ class WxInterface {
 
 export default {
 	async fetch(request, env) {
-		const inter = new WxInterface(request, env);
+		const api = new WxAPI(request, env);
 		const url = new URL(request.url);
 		const path_arr = url.pathname.substring(1).split("/");
 
 		if (path_arr[0] === "") {
-			return inter.handleRoot();
+			return api.handleRoot();
 		} else if (path_arr[0] === "ws") {
-			return inter.handleWs();
+			return api.handleWs();
 		} else if (path_arr[0] === "qrcode") {
-			return inter.handleQrcode();
+			return api.handleQrcode();
 		} else if (path_arr[0] === "login") {
-			return inter.handleLogin();
+			return api.handleLogin();
 		} else if (path_arr[0] === "init") {
-			return inter.handleInit();
+			return api.handleInit();
 		}
 		return Response.json({ code: 400, msg: "Not found" });
 	}
