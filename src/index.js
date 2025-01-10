@@ -124,14 +124,14 @@ class WxInterface {
 		return new XMLBuilder().build(xmlReply);
 	}
 
-	#doRootTextOnly(xmlMsg) {
+	#doRootTextOnly(xmlMsg, text) {
 		const xmlReply = {
 			xml: {
 				ToUserName: xmlMsg.FromUserName,
 				FromUserName: xmlMsg.ToUserName,
 				CreateTime: Math.floor(Date.now() / 1000).toString(),
 				MsgType: "text",
-				Content: "[叮叮~] 当前仅支持文字消息哈"
+				Content: text || "[叮叮~] 当前仅支持文字消息哈"
 			}
 		};
 		return new XMLBuilder().build(xmlReply);
@@ -155,6 +155,10 @@ class WxInterface {
 
 	async #doRootAction(xmlMsg) {
 		if (xmlMsg.MsgType === "event") {
+			const { success } = await this.LIMIT.limit({ key: `WxMsg_${xmlMsg.FromUserName}` });
+			if (!success) {
+				return this.#doRootTextOnly(xmlMsg, `慢一点！慢一点！要坚持不住啦~\n[id: ${WXBizMsgCrypt.randStr(4)}]`);
+			}
 			if (xmlMsg.Event === "subscribe") {
 				return this.#doRootSubscribe();
 			} else if (xmlMsg.Event === "CLICK") {
@@ -165,7 +169,7 @@ class WxInterface {
 		} else if (xmlMsg.MsgType === "text") {
 			return await this.#doRootText(xmlMsg);
 		}
-		return this.#doRootTextOnly();
+		return this.#doRootTextOnly(xmlMsg);
 	}
 
 	async #rootActionAes() {
@@ -303,7 +307,7 @@ class WxInterface {
 			await this.DB.delete(codeKey);
 			await this.DB.delete(uidKey);
 			return this.#restResp({ code: 200, msg: "登录成功", data: uid });
-		} catch(e) {
+		} catch (e) {
 			console.log(e);
 			return this.#restResp({ code: 400, msg: "Param Error" });
 		}
