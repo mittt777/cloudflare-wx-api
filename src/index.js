@@ -1,8 +1,12 @@
+import HTML from "./login-html";
+import Static from "./static";
 const QRCode = require("qrcode-svg");
 import WXBizMsgCrypt from "./WXBizMsgCrypt";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
 class WxAPI {
+	#TicketSize = 32;
+	#TicketPrefix = "TinWxApiToken-";
 	constructor(request, env) {
 		this.args = Object.fromEntries(new URL(request.url).searchParams);
 		this.request = request;
@@ -81,13 +85,19 @@ class WxAPI {
 	}
 
 	async #doRootScan(xmlMsg) {
-		const ticketKey = `_Ticket_${xmlMsg.ScanCodeInfo.ScanResult}`;
-		const ok = (await this.DB.get(ticketKey)) === null;
-		let content = `emmm~，看起来不像我认识的登录二维码：\n${xmlMsg.ScanCodeInfo.ScanResult}`;
-		if (ok) {
-			await this.DB.put(ticketKey, xmlMsg.FromUserName, { expirationTtl: 60 });
-			content = "恭喜你，登录成功！";
+		const raw = xmlMsg.ScanCodeInfo.ScanResult, ticket = raw.substring(this.#TicketPrefix.length);
+		let content = `emmm~，看起来不像我认识的登录二维码：\n${raw}`;
+		if (raw.startsWith(this.#TicketPrefix) && ticket.length === this.#TicketSize) {
+			const ticketKey = `_Ticket_${ticket}`;
+			const ok = (await this.DB.get(ticketKey)) === null;
+			if (ok) {
+				await this.DB.put(ticketKey, xmlMsg.FromUserName, { expirationTtl: 60 });
+				content = "恭喜你，登录成功！";
+			} else {
+				content = "[!警告!] 非法访问";
+			}
 		}
+
 		const xmlReply = {
 			xml: {
 				ToUserName: xmlMsg.FromUserName,
@@ -215,67 +225,7 @@ class WxAPI {
 		return new Response(reply);
 	}
 
-	////////////////////////////////////////////////// = Qrcode Login = //////////////////////////////////////////////////
-	async #handleSession(websocket) {
-		let timer, times = 0, ticket,
-			ticketKey, ipKey = `_IP_Ticket_${this.ip}`;
-		const clearAll = async () => {
-			if (timer !== null) {
-				clearInterval(timer);
-				timer = null;
-			}
-			times = 300;
-			await this.DB.delete(ipKey);
-			await this.DB.delete(ticketKey);
-			websocket.close();
-		}
-
-		websocket.accept();
-		ticket = await this.DB.get(ipKey);
-		if (ticket === null) {
-			ticket = WXBizMsgCrypt.randStr(32);
-			ticketKey = `_Ticket_${ticket}`;
-			while ((await this.DB.get(ticketKey)) !== null) {
-				ticket = WXBizMsgCrypt.randStr(32);
-				ticketKey = `_Ticket_${ticket}`;
-			}
-			await this.DB.put(ipKey, ticket, { expirationTtl: 300 });
-		}
-		const url = new URL(this.request.url);
-		websocket.send(JSON.stringify({ code: 100, data: `https://${url.host}/qrcode?ticket=${ticket}` }));
-
-		timer = setInterval(async () => {
-			if (++times > 300) {
-				websocket.send(JSON.stringify({ code: 400, msg: "消息超时" }));
-				clearAll();
-				return;
-			}
-			const value = await this.DB.get(ticketKey);
-			if (value === null) {
-				(times % 5 === 0) && websocket.send(JSON.stringify({ code: 300, msg: "等待用户扫码" }));
-			} else {
-				websocket.send(JSON.stringify({ code: 200, data: value }));
-				clearAll();
-			}
-		}, 1000);
-		websocket.addEventListener("close", clearAll);
-	}
-
-	async handleWs() {
-		const upgradeHeader = this.request.headers.get("Upgrade");
-		if (upgradeHeader !== "websocket") {
-			return new Response("Expected websocket", { status: 400 });
-		}
-
-		const [client, server] = Object.values(new WebSocketPair());
-		await this.#handleSession(server);
-
-		return new Response(null, {
-			status: 101,
-			webSocket: client
-		});
-	}
-
+	////////////////////////////////////////////////// = OAuth Login = //////////////////////////////////////////////////
 	async handleQrcode() {
 		if (this.request.method !== "GET") {
 			return this.#restResp({ code: 400, msg: "Method Not Allowed" });
@@ -283,34 +233,63 @@ class WxAPI {
 		if (this.args.ticket === undefined) {
 			return this.#restResp({ code: 400, msg: "Param Error" });
 		}
-		const qr = new QRCode({ content: this.args.ticket, join: true, pretty: false });
+		const qr = new QRCode({ content: this.args.ticket, join: true, pretty: false, padding: 1 });
 		return new Response(qr.svg(), { headers: { "Content-Type": "image/svg+xml" } });
 	}
 
-	////////////////////////////////////////////////// = Code Login = //////////////////////////////////////////////////
-	async handleLogin() {
-		if (this.request.method !== "POST") {
-			return this.#restResp({ code: 400, msg: "Method Not Allowed" });
-		}
-		const { success } = await this.LIMIT.limit({ key: `Login_${this.ip}` });
-		if (!success) {
-			return this.#restResp({ code: 400, msg: "Rate Limited" });
-		}
-		try {
-			const code = await this.request.text();
-			const codeKey = `_Code_${code}`;
-			const uid = await this.DB.get(codeKey);
-			if (uid === null) {
-				return this.#restResp({ code: 400, msg: "验证码错误或已过期" });
+	async handleOauth() {
+		if (this.request.method === "GET") {
+			return new Response(HTML, {
+				status: 200,
+				headers: {
+					"content-type": "text/html"
+				}
+			});
+		} else if (this.request.method === "POST") {
+			const { success } = await this.LIMIT.limit({ key: `OAuth_${this.ip}` });
+			if (!success) {
+				return this.#restResp({ code: 400, msg: "Rate Limited" });
 			}
-			const uidKey = `_Uid_${uid}`;
-			await this.DB.delete(codeKey);
-			await this.DB.delete(uidKey);
-			return this.#restResp({ code: 200, msg: "登录成功", data: uid });
-		} catch (e) {
-			console.log(e);
-			return this.#restResp({ code: 400, msg: "Param Error" });
+			try {
+				const payload = await this.request.json();
+				if (payload.type === "ticket") {
+					const ipKey = `_IP_Ticket_${this.ip}`;
+					let ticket = await this.DB.get(ipKey);
+					if (ticket === null) {
+						ticket = WXBizMsgCrypt.randStr(this.#TicketSize);
+						while ((await this.DB.get(`_Ticket_${ticket}`)) !== null) {
+							ticket = WXBizMsgCrypt.randStr(this.#TicketSize);
+						}
+						await this.DB.put(ipKey, ticket, { expirationTtl: 300 });
+					}
+					return this.#restResp({ code: 200, data: `${this.#TicketPrefix}${ticket}` });
+				} else if (payload.type === "login") {
+					const codeKey = `_Code_${payload.data}`;
+					const uid = await this.DB.get(codeKey);
+					if (uid === null) {
+						return this.#restResp({ code: 400, msg: "验证码错误或已过期" });
+					}
+					const uidKey = `_Uid_${uid}`;
+					await this.DB.delete(codeKey);
+					await this.DB.delete(uidKey);
+					return this.#restResp({ code: 200, msg: "登录成功", data: uid });
+				} else if (payload.type === "query") {
+					const ticket = payload.data.substring(this.#TicketPrefix.length);
+					const value = await this.DB.get(`_Ticket_${ticket}`);
+					if (value === null) {
+						return this.#restResp({ code: 300, msg: "waiting" });
+					}
+					await this.DB.delete(`_IP_Ticket_${this.ip}`);
+					await this.DB.delete(`_Ticket_${ticket}`);
+					return this.#restResp({ code: 200, data: value });
+				}
+				return this.#restResp({code: 400, msg: "Param Error"});
+			} catch (e) {
+				console.log(e);
+				return this.#restResp({ code: 400, msg: "Param Error" });
+			}
 		}
+		return this.#restResp({ code: 400, msg: "Method Not Allowed" });
 	}
 
 	////////////////////////////////////////////////// = Init = //////////////////////////////////////////////////
@@ -385,12 +364,14 @@ export default {
 
 		if (path_arr[0] === "") {
 			return api.handleRoot();
-		} else if (path_arr[0] === "ws") {
-			return api.handleWs();
+		} else if (path_arr[0] === "favicon.ico") {
+			return new Response(Static.Icon, { headers: { "Content-Type": "image/svg+xml" } });
+		} else if (path_arr[0] === "wx-follow") {
+			return new Response(Static.TinAI, { headers: { "Content-Type": "image/svg+xml" } });
 		} else if (path_arr[0] === "qrcode") {
 			return api.handleQrcode();
-		} else if (path_arr[0] === "login") {
-			return api.handleLogin();
+		} else if (path_arr[0] === "oauth") {
+			return api.handleOauth();
 		} else if (path_arr[0] === "init") {
 			return api.handleInit();
 		}
