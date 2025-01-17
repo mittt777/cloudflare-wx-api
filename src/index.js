@@ -67,7 +67,7 @@ class WxAPI {
 	async #doRootText(xmlMsg) {
 		let content;
 		try {
-			content = (await this.AI.run("@cf/qwen/qwen1.5-7b-chat-awq", { prompt: xmlMsg.Content })).response
+			content = (await this.AI.run("@cf/qwen/qwen1.5-0.5b-chat", { prompt: xmlMsg.Content })).response
 		} catch (e) {
 			console.log(e);
 			content = "啊哦，对面被你问宕机了~";
