@@ -7,17 +7,17 @@ routes = [
 ]
 
 kv_namespaces = [
-  { binding = "DB", id = "your-kv-db-id" }
+  { binding = "pgyh", id = "2097a73a271e4ebda65d303915b5af65" }
 ]
 
 [ai]
 binding = "AI"
 
 [vars]
-AppID = "your-appid"
-AppToken = "your-token"
-AppSecret = "your-secret"
-AppAesKey = "your-aes-key"
+AppID = "wx1763dce290fb74d8"
+AppToken = "microtech123"
+AppSecret = "5d8389c5f877"
+AppAesKey = "07cf50a1f17a4849290ed2cbcf5aa26c"
 AesMode = "OFF"
 InitAuth = "your-init-auth"
 AllowOrigin = "your-front-allow-list"
