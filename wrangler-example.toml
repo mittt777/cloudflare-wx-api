@@ -15,9 +15,9 @@ binding = "AI"
 
 [vars]
 AppID = "wx1763dce290fb74d8"
-AppToken = "microtech123"
-AppSecret = "5d8389c5f877"
-AppAesKey = "07cf50a1f17a4849290ed2cbcf5aa26c"
+AppToken = ""
+AppSecret = ""
+AppAesKey = ""
 AesMode = "OFF"
 InitAuth = "your-init-auth"
 AllowOrigin = "your-front-allow-list"
